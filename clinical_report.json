@@ -1,0 +1,216 @@
+{
+    "pipeline_status": "production_ready_scaffold",
+    "trl_level": "4/5 Scaffold Verified",
+    "telemetry": {
+        "input_shape": [
+            3,
+            20000
+        ],
+        "latent_features_shape": [
+            3,
+            128
+        ],
+        "trajectory_steps": 5,
+        "ebm_energy_threshold": 1.1
+    },
+    "diagnostic_reports": [
+        {
+            "sample_id": "SMP-2026-001",
+            "predicted_compound_class": "Plant_Extract_A",
+            "raw_energy_score": 0.323,
+            "cleaned_energy_score": 0.323,
+            "ghost_peak_detected": false,
+            "ebm_validation": "PASSED",
+            "biomarkers": [
+                {
+                    "compound_name": "Sucrose",
+                    "source_database": "HMDB0000258",
+                    "match_confidence": 0.98,
+                    "formula": "C12H22O11"
+                },
+                {
+                    "compound_name": "Glucose",
+                    "source_database": "HMDB0000122",
+                    "match_confidence": 0.97,
+                    "formula": "C6H12O6"
+                },
+                {
+                    "compound_name": "Fructose",
+                    "source_database": "HMDB0000660",
+                    "match_confidence": 0.95,
+                    "formula": "C6H12O6"
+                },
+                {
+                    "compound_name": "Maltose",
+                    "source_database": "HMDB0000163",
+                    "match_confidence": 0.93,
+                    "formula": "C12H22O11"
+                },
+                {
+                    "compound_name": "Alanine",
+                    "source_database": "HMDB0000161",
+                    "match_confidence": 0.91,
+                    "formula": "C3H7NO2"
+                },
+                {
+                    "compound_name": "Valine",
+                    "source_database": "HMDB0000883",
+                    "match_confidence": 0.9,
+                    "formula": "C5H11NO2"
+                },
+                {
+                    "compound_name": "Threonine",
+                    "source_database": "HMDB0000167",
+                    "match_confidence": 0.89,
+                    "formula": "C4H9NO3"
+                },
+                {
+                    "compound_name": "Citrate",
+                    "source_database": "HMDB0000094",
+                    "match_confidence": 0.92,
+                    "formula": "C6H8O7"
+                },
+                {
+                    "compound_name": "Chlorogenate",
+                    "source_database": "HMDB0003164",
+                    "match_confidence": 0.88,
+                    "formula": "C16H18O9"
+                },
+                {
+                    "compound_name": "Choline",
+                    "source_database": "HMDB0000097",
+                    "match_confidence": 0.87,
+                    "formula": "C5H13NO"
+                }
+            ]
+        },
+        {
+            "sample_id": "SMP-2026-002",
+            "predicted_compound_class": "Plant_Extract_B",
+            "raw_energy_score": 0.308,
+            "cleaned_energy_score": 0.308,
+            "ghost_peak_detected": false,
+            "ebm_validation": "PASSED",
+            "biomarkers": [
+                {
+                    "compound_name": "Chlorogenate",
+                    "source_database": "HMDB0003164",
+                    "match_confidence": 0.97,
+                    "formula": "C16H18O9"
+                },
+                {
+                    "compound_name": "Tyrosine",
+                    "source_database": "HMDB0000158",
+                    "match_confidence": 0.96,
+                    "formula": "C9H11NO3"
+                },
+                {
+                    "compound_name": "Phenylalanine",
+                    "source_database": "HMDB0000159",
+                    "match_confidence": 0.95,
+                    "formula": "C9H11NO2"
+                },
+                {
+                    "compound_name": "Tryptophan",
+                    "source_database": "HMDB0000929",
+                    "match_confidence": 0.94,
+                    "formula": "C11H12N2O2"
+                },
+                {
+                    "compound_name": "Sucrose",
+                    "source_database": "HMDB0000258",
+                    "match_confidence": 0.89,
+                    "formula": "C12H22O11"
+                },
+                {
+                    "compound_name": "Citrate",
+                    "source_database": "HMDB0000094",
+                    "match_confidence": 0.91,
+                    "formula": "C6H8O7"
+                },
+                {
+                    "compound_name": "Formate",
+                    "source_database": "HMDB0000142",
+                    "match_confidence": 0.93,
+                    "formula": "CH2O2"
+                },
+                {
+                    "compound_name": "Acetate",
+                    "source_database": "HMDB0000042",
+                    "match_confidence": 0.88,
+                    "formula": "C2H4O2"
+                },
+                {
+                    "compound_name": "Glutamate",
+                    "source_database": "HMDB0000148",
+                    "match_confidence": 0.87,
+                    "formula": "C5H9NO4"
+                }
+            ]
+        },
+        {
+            "sample_id": "SMP-2026-003",
+            "predicted_compound_class": "Plant_Extract_C",
+            "raw_energy_score": 0.316,
+            "cleaned_energy_score": 0.316,
+            "ghost_peak_detected": false,
+            "ebm_validation": "PASSED",
+            "biomarkers": [
+                {
+                    "compound_name": "Valine",
+                    "source_database": "HMDB0000883",
+                    "match_confidence": 0.97,
+                    "formula": "C5H11NO2"
+                },
+                {
+                    "compound_name": "Leucine",
+                    "source_database": "HMDB0000687",
+                    "match_confidence": 0.96,
+                    "formula": "C6H13NO2"
+                },
+                {
+                    "compound_name": "Isoleucine",
+                    "source_database": "HMDB0000172",
+                    "match_confidence": 0.95,
+                    "formula": "C6H13NO2"
+                },
+                {
+                    "compound_name": "Alanine",
+                    "source_database": "HMDB0000161",
+                    "match_confidence": 0.94,
+                    "formula": "C3H7NO2"
+                },
+                {
+                    "compound_name": "Threonine",
+                    "source_database": "HMDB0000167",
+                    "match_confidence": 0.93,
+                    "formula": "C4H9NO3"
+                },
+                {
+                    "compound_name": "Ethanol",
+                    "source_database": "HMDB0000108",
+                    "match_confidence": 0.92,
+                    "formula": "C2H6O"
+                },
+                {
+                    "compound_name": "Glucose",
+                    "source_database": "HMDB0000122",
+                    "match_confidence": 0.88,
+                    "formula": "C6H12O6"
+                },
+                {
+                    "compound_name": "Maltose",
+                    "source_database": "HMDB0000163",
+                    "match_confidence": 0.87,
+                    "formula": "C12H22O11"
+                },
+                {
+                    "compound_name": "Citrate",
+                    "source_database": "HMDB0000094",
+                    "match_confidence": 0.86,
+                    "formula": "C6H8O7"
+                }
+            ]
+        }
+    ]
+}
