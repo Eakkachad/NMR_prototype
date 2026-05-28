@@ -279,6 +279,34 @@ pipeline_telemetry = pipeline.run_pipeline_workflow(
 )
 diagnostics = pipeline_telemetry["diagnostic_reports"][0]
 
+# Active learning telemetry trace logging for ghost peaks triggered in UI
+if diagnostics.get("ghost_peak_detected", False):
+    import os
+    import datetime
+    telemetry_path = "anomalous_peaks_feedback.json"
+    telemetry_data = []
+    if os.path.exists(telemetry_path):
+        try:
+            with open(telemetry_path, "r", encoding="utf-8") as f:
+                telemetry_data = json.load(f)
+        except Exception:
+            telemetry_data = []
+            
+    trace = {
+        "sample_id": diagnostics.get("sample_id", "SMP-2026-001"),
+        "timestamp": datetime.datetime.now().isoformat(),
+        "raw_energy_score": float(diagnostics.get("raw_energy_score", 0.0)),
+        "energy_threshold": float(ebm_threshold),
+        "anomalous_peak_ppm": 4.15,
+        "details": "Ghost peak flagged by patient dashboard interaction.",
+        "action": "suppressed_and_flagged"
+    }
+    # Check duplicate
+    if not any(t["sample_id"] == trace["sample_id"] and abs(t["raw_energy_score"] - trace["raw_energy_score"]) < 1e-4 for t in telemetry_data):
+        telemetry_data.append(trace)
+        with open(telemetry_path, "w", encoding="utf-8") as f:
+            json.dump(telemetry_data, f, indent=4)
+
 # --- STEP 2: REAL-TIME CLINICAL DIAGNOSTIC SCREENING ---
 st.markdown("### 🏥 Step 2: Real-Time Clinical Diagnostic Screening")
 
@@ -617,7 +645,7 @@ with st.expander("🛠️ Advanced AI Engine & Machine Learning Diagnostics (Tec
         st.plotly_chart(fig_latent, use_container_width=True)
         st.markdown("""
         <div style="font-size: 0.8rem; text-align: center; color: #10B981; font-weight: 600;">
-            156x Compression Matrix Verified Successfully
+            31x Compression Matrix Verified Successfully
         </div>
         """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)

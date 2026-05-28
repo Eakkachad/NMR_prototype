@@ -425,11 +425,11 @@ class SyntheticNMRGenerator:
             add_ghost_peaks: Whether to inject anomalous high-energy ghost peaks.
             
         Returns:
-            spectra: [batch_size, 20000] intensity tensor.
-            ppm_axis: [20000] chemical shift vector.
+            spectra: [batch_size, 4000] intensity tensor.
+            ppm_axis: [4000] chemical shift vector.
             labels: List of ground-truth compound classes.
         """
-        ppm_axis = np.linspace(0.0, 10.0, 20000)
+        ppm_axis = np.linspace(0.0, 10.0, 4000)
         spectra_list = []
         labels = []
         
@@ -442,7 +442,7 @@ class SyntheticNMRGenerator:
             labels.append(label)
             
             # Base spectrum structure depending on extract class
-            spectrum = np.zeros(20000)
+            spectrum = np.zeros(4000)
             profile = profiles[label]
             
             # Render Lorentzian peaks with pH/Temp chemical shift drift
@@ -465,7 +465,7 @@ class SyntheticNMRGenerator:
                 spectrum += ghost_profile
                 
             # Add baseline noise
-            spectrum += np.random.normal(0, noise_level, 20000)
+            spectrum += np.random.normal(0, noise_level, 4000)
             spectrum = np.maximum(spectrum, 0.0)  # NMR physical constraint: intensity cannot be negative
             spectra_list.append(spectrum)
             
@@ -517,7 +517,7 @@ class NMRFeatureEncoder(nn.Module):
     Stage 1: Generative Dimensionality Reduction (Feature Selection).
     Bypasses standard PCA by learning a projection into a dense 128-dimensional latent space.
     """
-    def __init__(self, input_dim: int = 20000, latent_dim: int = 128):
+    def __init__(self, input_dim: int = 4000, latent_dim: int = 128):
         super().__init__()
         # PyTorch random initialized weights (untrained representation)
         self.compressor = nn.Sequential(

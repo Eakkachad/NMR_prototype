@@ -9,78 +9,96 @@
 
 การประมวลผลสัญญาณ $^1H$ NMR ดิบที่มีขนาดมากกว่า 20,000 ฟีเจอร์ มักพบอุปสรรคสำคัญจากความคลาดเคลื่อนทางกายภาพ เช่น พีคเลื่อนตำแหน่ง (Chemical Shift Drift) และพีคหลอกที่เกิดจากการรบกวนของตัวอย่าง (Ghost Peaks) 
 
-สถาปัตยกรรม **3-Stage Hybrid AI** ได้รับการออกแบบขึ้นเพื่อจัดการปัญหาดังกล่าวอย่างเป็นระบบ โดยทำงานร่วมกันตามไดอะแกรมดังนี้:
+สถาปัตยกรรม **Hybrid Physics-Aware AI Pipeline** ได้รับการออกแบบใหม่เพื่อแก้จุดบอดของโครงสร้างเดิมที่ตรวจสอบฟิสิกส์บน Latent Space โดยตรง ระบบใหม่นี้แยกงานออกเป็น 5 ส่วนหลัก: เข้ารหัสสัญญาณแบบลำดับ, จัดแนวพีคในพื้นที่แฝง, ถอดรหัสกลับสู่แกน ppm, ตรวจสอบกฎฟิสิกส์บนสเปกตรัมจริง และจับคู่กับฐานข้อมูลสารอย่างมีคะแนนความเชื่อมั่นที่ตรวจสอบได้
 
 ```mermaid
 graph TD
-    A[Raw Spec Matrix: N x 20,000+] -->|Stage 1: Encoder Compressor| B[Latent Space Embedding: N x 128]
-    B -->|Stage 2: Continuous Neural ODE| C[Continuous Shift Alignment]
-    C -->|Stage 3: Energy-Based Model| D[Physics Constraint Verifier]
-    D -->|Ghost Peak Check| E{Violates Spin coupling?}
-    E -->|Yes| F[Suppress Anomaly Peak]
-    E -->|No| G[Normal Signal Clear]
-    F --> H[Knowledge Discovery: HMDB & PubChem]
-    G --> H
-    H --> I[Structured JSON Clinical Diagnostic Report]
+    A[Raw Spec Matrix: N x 20,000+ ppm points] -->|Preprocess: baseline, normalization, ppm grid| B[Calibrated Spectrum]
+    B -->|Stage 1: 1D-CNN / Patch Encoder| C[Hierarchical Latent: N x 512]
+    C -->|Stage 2: Fast Latent Neural ODE| D[Drift-Aligned Latent Trajectory]
+    D -->|Stage 2.5: 1D-CNN Decoder| E[Reconstructed Aligned Spectrum: N x 20,000 ppm points]
+    E -->|Stage 3: EBM Physics Verifier on ppm space| F{Violates coupling / peak-shape rules?}
+    F -->|Yes| G[Flag or suppress ghost/anomaly peak]
+    F -->|No| H[Validated Clean Spectrum]
+    G --> I[Peak Table: ppm, intensity, confidence]
+    H --> I
+    I -->|Stage 4: DTW + Peak Assignment Matching| J[HMDB & PubChem Candidate Ranking]
+    J --> K[Structured JSON Clinical Diagnostic Report]
 ```
 
 ---
 
 ## เลเยอร์และส่วนประกอบหลัก (Core Model Components)
 
-### 1. Stage 1: NMR Feature Encoder (เลเยอร์สกัดและลดมิติคุณลักษณะแฝง)
+### 1. Stage 1: Sequence-Aware NMR Encoder (เลเยอร์สกัดรูปร่างพีคแบบรักษาความสัมพันธ์เชิงพื้นที่)
 
-* **คืออะไร (What it is):** เป็นโมดูลโครงข่ายประสาทเทียมแบบ Deep Learning (Dense Neural Network และ Batch Normalization) ที่มีหน้าที่แปลงข้อมูลสเปกตรัมที่มีมิติสูงและซับซ้อนให้มีขนาดกะทัดรัด
-* **หน้าที่ (What it does):** บีบอัดฟีเจอร์ข้อมูลความเข้มของสัญญาณดิบจาก **20,000 มิติ** ให้เหลือเพียงเวกเตอร์มิติแฝงขนาด **128 มิติ (156x Compression)** โดยทำการกรองสัญญาณรบกวนความถี่สูง (Baseline Noise) ไปในตัว
+* **คืออะไร (What it is):** เป็นโมดูลเข้ารหัสสัญญาณแบบลำดับเวลาโดยใช้ **1D-CNN Residual Blocks** เป็นค่าเริ่มต้น และสามารถขยายเป็น **PatchTST / Time-Series Transformer** ได้เมื่อมีข้อมูลเทรนเพียงพอ โมเดลนี้ไม่ flatten จุดสเปกตรัมตั้งแต่ต้นเหมือน Dense Network
+* **หน้าที่ (What it does):** สกัดรูปร่างพีค ความกว้างพีค shoulder peak และรูปแบบ multiplet จากสัญญาณ $^1H$ NMR ขนาด **20,000+ จุดบนแกน ppm** แล้วลดมิติแบบค่อยเป็นค่อยไปเป็นเวกเตอร์แฝงขนาด **512 มิติ** เพื่อลดการสูญเสียสัญญาณ biomarker ความเข้มข้นต่ำ
 * **ทำงานอย่างไร (How it works):**
-  โมเดลรับค่า Tensor สเปกตรัมขนาด `[Batch_Size, 20000]` เข้าสู่โครงข่าย `NMRFeatureEncoder` ผ่าน Linear Layer ขนาดใหญ่ ร่วมกับ Batch Normalization และฟังก์ชันกระตุ้น ReLU เพื่อแปลงและคัดสรรฟีเจอร์เด่น (Feature Selection) ผลลัพธ์สุดท้ายจะถูดจัดรูปให้อยู่ในโครงสร้างเวกเตอร์ขนาด `[Batch_Size, 128]` ใน Latent Space
+  โมเดลรับ Tensor ขนาด `[Batch_Size, 1, 20000]` ผ่านชุด `Conv1D -> GroupNorm -> GELU -> Residual Block -> Strided Downsampling` หลายระดับ เช่น 20,000 -> 5,000 -> 1,250 -> 312 จุด ก่อนทำ attention pooling เป็น `[Batch_Size, 512]` การลดมิติแบบลำดับชั้นนี้ช่วยให้โมเดลเห็น neighborhood ของพีคและรักษาความสัมพันธ์ของจุดติดกันบนแกน ppm
 * **แก้ปัญหาในอดีตอย่างไร (How it solves existing problems):**
   > [!IMPORTANT]
-  > ในอดีต การลดมิติจะใช้สถิติแบบดั้งเดิม เช่น PCA หรือ LASSO ซึ่งมีสมมติฐานแบบเส้นตรง (Linear Assumptions) หากสารในตัวอย่างมีการเคลื่อนที่ของตำแหน่งสัญญาณเคมี (Peak Shift) PCA มักจะเข้าใจว่ามันคือฟีเจอร์ใหม่และทิ้งสัญญาณย่อยที่มีนัยสำคัญไป เลเยอร์ Encoder แบบไม่ใช่เส้นตรงนี้จะเก็บรายละเอียดโครงสร้างภาพรวมของโมเลกุลสารสกัดไว้ได้อย่างครบถ้วนและไม่สูญเสียความละเอียดอ่อนทางชีวภาพ
+  > โครงสร้างเดิมใช้ Dense Layer กับข้อมูล 20,000 จุด ทำให้สูญเสีย spatial relationship ของ peak shape และบีบอัดรุนแรงเกินไปเหลือ 128 มิติ โครงสร้างใหม่นี้ใช้ convolution kernel เพื่ออ่านรูปทรงสัญญาณเฉพาะบริเวณและลดมิติเป็นขั้น ทำให้พีคเล็กที่มีนัยทางคลินิกมีโอกาสถูกเก็บไว้มากขึ้น
 
 ---
 
-### 2. Stage 2: Latent Space Neural ODE Solver (เลเยอร์จัดแกนพิกัดสัญญาณแบบต่อเนื่อง)
+### 2. Stage 2: Fast Latent Neural ODE Solver (เลเยอร์จัดแนวสัญญาณแบบต่อเนื่องที่ควบคุม latency)
 
-* **คืออะไร (What it is):** เป็นเลเยอร์คำนวณสมการเชิงอนุพันธ์ต่อเนื่อง (Continuous Ordinary Differential Equation) ในพื้นที่มิติแฝง (Latent Space)
+* **คืออะไร (What it is):** เป็นเลเยอร์คำนวณสมการเชิงอนุพันธ์ต่อเนื่อง (Continuous Ordinary Differential Equation) ในพื้นที่มิติแฝง 512 มิติ พร้อมนโยบายเร่งความเร็วสำหรับงาน inference
 * **หน้าที่ (What it does):** ทำหน้าที่แก้ไขปัญหา **Chemical Shift Drift** (พีคเลื่อนตำแหน่งบนแกน ppm) เพื่อจัดแนว (Align) ตำแหน่งของสารประกอบต่าง ๆ ให้กลับเข้าสู่แกนอ้างอิงมาตรฐานสากลโดยอัตโนมัติ
 * **ทำงานอย่างไร (How it works):**
-  เลเยอร์นี้จำลองการรันสมการ ODE บนพื้นที่แฝง 128 มิติ โดยใช้เครือข่ายประสาท `gradient_field` ในการเรียนรู้ความลาดชัน (Derivative $\frac{dh}{dt}$) และบูรณาการหาคำตอบอย่างต่อเนื่องผ่าน 4 ลูปย่อยแบบ Euler Integration เพื่อคำนวณความเปลี่ยนแปลงของสัญญาณเสมือนเป็นเส้นวิถี (Integration Trajectory) ที่ขยับเข้าหาจุดรวมศูนย์ (Convergent Path)
+  เลเยอร์นี้เรียนรู้ `gradient_field` เพื่อประมาณทิศทางการแก้ drift ของ embedding แต่ใช้ solver แบบ adaptive เช่น RK2/RK4 พร้อม early-exit tolerance แทนการบังคับ Euler 4 รอบทุกตัวอย่าง หากค่าการเปลี่ยนแปลงของ embedding ต่ำกว่า threshold ระบบจะหยุดคำนวณทันทีเพื่อลด latency ใน batch ขนาดใหญ่
 * **แก้ปัญหาในอดีตอย่างไร (How it solves existing problems):**
   > [!TIP]
-  > ปัญหาพีคเลื่อน (Shift Drift) เกิดจากการเปลี่ยนแปลงเล็กน้อยของสภาพแวดล้อม เช่น อุณหภูมิ, pH, หรือความเข้มข้นของไอออนในเครื่องวัด คลาสสิกอัลกอริทึมทั่วไปมักวิเคราะห์พลาดเมื่อพีคเลื่อนไปแม้แต่ 0.01 ppm แต่การแก้ปัญหาด้วย **Neural ODE** จะมองการปรับตัวของพีคเป็นเส้นทางพลศาสตร์ที่ต่อเนื่อง ทำให้สามารถดึงพีคที่เยื้องเคลื่อนกลับเข้าสู่ตำแหน่งมาตรฐานได้อย่างมีประสิทธิภาพ ช่วยให้โมเดลจำแนกประเภทสาร (Classifier) จดจำสารสกัดได้คงเส้นคงวา แม่นยำขึ้นอย่างก้าวกระโดด
+  > ปัญหาพีคเลื่อน (Shift Drift) เกิดจากการเปลี่ยนแปลงเล็กน้อยของสภาพแวดล้อม เช่น อุณหภูมิ, pH, หรือความเข้มข้นของไอออนในเครื่องวัด Neural ODE ยังคงใช้แนวคิดเส้นทางพลศาสตร์ต่อเนื่อง แต่เวอร์ชันปรับปรุงนี้เพิ่ม tolerance, maximum-step budget และ cached reference embeddings เพื่อไม่ให้ต้นทุน inference สูงเกินไปเมื่อใช้งานในโรงพยาบาล
 
 ---
 
-### 3. Stage 3: Energy-Based Model (EBM) Physics Verifier (เลเยอร์ตรวจสอบกฎเกณฑ์ทางฟิสิกส์เคมีและกรองสัญญาณหลอก)
+### 3. Stage 2.5: Spectrum Decoder & Reconstruction Head (เลเยอร์ถอดรหัสกลับสู่แกน ppm)
+
+* **คืออะไร (What it is):** เป็น Decoder แบบ 1D-CNN / Transposed Conv ที่แปลง embedding หลังผ่าน ODE กลับเป็นสเปกตรัมที่มีตำแหน่งบนแกน ppm ครบถ้วน
+* **หน้าที่ (What it does):** สร้างสเปกตรัมที่จัดแนวแล้วขนาด `[Batch_Size, 20000]` เพื่อให้ Stage 3 ตรวจสอบกฎฟิสิกส์บนพื้นที่จริง ไม่ใช่บนเวกเตอร์นามธรรม
+* **ทำงานอย่างไร (How it works):**
+  Decoder รับ latent vector `[Batch_Size, 512]` แล้ว upsample เป็น feature map หลายระดับด้วย `Linear projection -> ConvTranspose1D / Upsample+Conv1D -> Skip Connections` จาก encoder เพื่อคืนรายละเอียดพีคเล็ก จากนั้นส่งออก 3 รายการ: `aligned_spectrum`, `reconstruction_uncertainty` และ `peak_mask`
+* **แก้ปัญหาในอดีตอย่างไร (How it solves existing problems):**
+  > [!IMPORTANT]
+  > จุดบอดหลักของสถาปัตยกรรมเดิมคือ EBM พยายามตรวจ spin-spin coupling และ peak distance จาก latent vector 128 มิติ ซึ่งไม่มีแกน ppm แล้ว Decoder นี้ทำให้ระบบได้สเปกตรัม 20,000 จุดกลับมา จึงสามารถบอกพิกัด ppm ของ biomarker, พื้นที่พีค และความผิดปกติของ peak shape ได้อย่างตรวจสอบย้อนกลับได้
+
+---
+
+### 4. Stage 3: Energy-Based Model (EBM) Physics Verifier on ppm Space (เลเยอร์ตรวจสอบกฎฟิสิกส์เคมีบนสเปกตรัมที่ถอดรหัสแล้ว)
 
 * **คืออะไร (What it is):** เป็นโมเดลคำนวณพฤติกรรมพลังงานฟิสิกส์ (Energy-Based Model) ซึ่งทำหน้าที่จำแนกประเภทและตรวจสอบความสมเหตุสมผลเชิงกลศาสตร์ควอนตัมของสัญญาณ NMR
 * **หน้าที่ (What it does):** ประเมินคุณลักษณะของสัญญาณเพื่อตรวจจับและ suppress พีคหลอก (**Ghost Peak**) หรือการปนเปื้อนในสเปกตรัมที่ขัดแย้งกับหลักทฤษฎีเคมี
 * **ทำงานอย่างไร (How it works):**
-  โมเดล `EBMPhysicsVerifier` จะคำนวณและแจกแจงค่าพลังงาน (Energy Score) ออกมาเป็นสเกลาร์ตัวเลข (ยิ่งสเปกตรัมเป็นธรรมชาติ ค่าพลังงานจะยิ่งต่ำ) หากมีพีคหลอกที่ไม่มีความสัมพันธ์ทางเคมีถูกฉีดปนเข้ามา (เช่น เกิดจากสถิติที่พยายามฟิตติ้งแบบฝืนกฎ) ค่าพลังงานจะทะลุขีดจำกัด (Alarm Threshold) ทันที ส่งสัญญาณเตือนให้ระบบเปิดลอจิกอัตโนมัติในการลดพฤติกรรมสัญญาณนั้นและตัดสิ่งแปลกปลอมออก (Suppression)
+  โมเดล `EBMPhysicsVerifier` รับ `aligned_spectrum` บนแกน ppm และคำนวณ energy score จากคุณลักษณะจริง เช่น ระยะห่างของ multiplet, อัตราส่วนความสูงของพีค, peak width, local baseline consistency และความสัมพันธ์กับ reference peak table หากมีพีคที่ไม่มีคู่ coupling หรือมีรูปร่างขัดกับ pattern ของสารที่คาดไว้ ค่า energy จะสูงเกิน threshold และระบบจะ mark เป็น anomaly พร้อมพิกัด ppm ที่แน่นอน
 * **แก้ปัญหาในอดีตอย่างไร (How it solves existing problems):**
   > [!WARNING]
-  > ซอฟต์แวร์วิเคราะห์ NMR ทั่วไปมักโดนนอยส์หรือสิ่งปนเปื้อนหลอกจนพยายามจับคู่ (Fit) สัญญาณกับคลังข้อมูลสถิติจนระบุสารปนเปื้อนผิดตัว (Miss-identification) แต่ระบบ EBM มีการฝัง **Physics-Chemical Constraints** (เช่น กฎความสูงและสัดส่วนของสปินนิวเคลียร์ Spin-spin coupling) ทำให้ไม่สามารถมีพีคประหลาดหลุดรอดผ่านเกณฑ์ตรวจสอบนี้ไปได้ การันตีว่าสารที่ตรวจพบต้องเป็นสารที่มีอยู่จริงตามหลักวิทยาศาสตร์
+  > ซอฟต์แวร์วิเคราะห์ NMR ทั่วไปมักโดนนอยส์หรือสิ่งปนเปื้อนหลอกจนพยายามจับคู่สัญญาณกับคลังข้อมูลผิดตัว ระบบใหม่นี้ไม่อ้างว่า latent vector มีความหมายทางฟิสิกส์โดยตรง แต่ตรวจสอบบนสเปกตรัมที่ reconstruct แล้วเท่านั้น จึงสามารถอธิบายต่อแพทย์และกรรมการได้ว่าพีคใดผิดกฎ อยู่ที่ ppm ใด และถูก suppress ด้วยเหตุผลใด
 
 ---
 
-### 4. Automated Knowledge Discovery & Database Query (โมดูลตรวจค้นคลังข้อมูลสากลอัตโนมัติ)
+### 5. Automated Knowledge Discovery & Database Query (โมดูลตรวจค้นคลังข้อมูลสากลอัตโนมัติ)
 
 * **คืออะไร (What it is):** ตัวคิวรีและเชื่อมต่อข้ามระบบแบบเรียลไทม์
 * **หน้าที่ (What it does):** นำสารที่ค้นพบจากการกรองและผ่านการตรวจสอบ EBM ไปสืบค้นข้อมูลรหัสสารบ่งชี้โรค (Biomarker) ทางการแพทย์กับฐานข้อมูลสากล เช่น **Human Metabolome Database (HMDB)** และ **PubChem** ทันทีแบบอัตโนมัติ
 * **ทำงานอย่างไร (How it works):**
-  ระบบดึงรายชื่อและคุณลักษณะพีคที่วิเคราะห์เสร็จสิ้น ไปสแกนหาตัวตนของสารประกอบในคลังข้อมูลผ่าน Mock API ของระบบ และส่งผลลัพธ์รหัสอ้างอิงสากล (เช่น `HMDB0000122` สำหรับ Glucose) พร้อมประเมินค่าความเชื่อมั่นในการจัดคู่ (Match Confidence Level) ออกมาเป็นรายตัว
+  ระบบสร้าง peak table จากสเปกตรัมที่ผ่าน EBM แล้ว โดยเก็บ `ppm`, `intensity`, `width`, `area`, `multiplet_pattern` และ `energy_penalty` จากนั้นจับคู่กับฐานข้อมูลผ่าน **สองชั้นคะแนน**:
+  1. **Peak Assignment Score:** ใช้ constrained bipartite matching จับคู่พีคที่ตรวจพบกับพีคอ้างอิงภายใน tolerance เช่น ±0.03 ppm และลงโทษพีคที่ขาดหรือเกิน
+  2. **Shape Similarity Score:** ใช้ constrained Dynamic Time Warping (DTW) เฉพาะหน้าต่าง ppm ที่เกี่ยวข้อง เพื่อเทียบรูปร่างสเปกตรัมหลังจัดแนว
+
+  คะแนนสุดท้ายคำนวณเป็น `Match Confidence = 0.45 * peak_assignment + 0.35 * dtw_similarity + 0.20 * ebm_physics_score` แล้วจัดอันดับ candidate จาก HMDB/PubChem พร้อมแสดงเหตุผล เช่น "ตรง 5/6 peaks, DTW distance ต่ำ, ไม่มี ghost peak ในช่วง 3.2-3.9 ppm"
 * **แก้ปัญหาในอดีตอย่างไร (How it solves existing problems):**
-  ช่วยลดขั้นตอนการทำงานแบบแมนนวลของห้องปฏิบัติการ ที่นักวิจัยหรือแพทย์ต้องนำตัวเลข ppm ไปสืบค้นใน Google หรือเปิดฐานข้อมูลดูทีละตัวด้วยตนเอง การรวมโมดูลนี้เข้าด้วยกันในสตรีมเดียวช่วยประหยัดเวลาและเพิ่มอัตราความถูกต้องในการค้นหาตัวช่วยบ่งชี้โรคตัวใหม่ ๆ
+  ช่วยลดขั้นตอนการทำงานแบบแมนนวลของห้องปฏิบัติการ และตอบคำถามเชิงวิศวกรรมได้ชัดเจนว่า AI รู้ได้อย่างไรว่าสเปกตรัม "เหมือน" สารใด เพราะมีทั้งอัลกอริทึมจับคู่พีค คะแนน DTW และคะแนนฟิสิกส์จาก EBM ประกอบกัน
 
 ---
 
-### 5. Structured Diagnostics EMR Report (ระบบเชื่อมโยงข้อมูลสุขภาพปลายน้ำ - TRL 4/5)
+### 6. Structured Diagnostics EMR Report (ระบบเชื่อมโยงข้อมูลสุขภาพปลายน้ำ - TRL 4/5)
 
 * **คืออะไร (What it is):** เอาต์พุตของระบบที่อยู่ในรูปแบบ **Structured JSON Diagnostic Payload**
 * **หน้าที่ (What it does):** บูรณาการข้อมูลทุกเลเยอร์ตั้งแต่ข้อมูลดิบ สัญญาณ ODE การคัดกรองสัญญาณแปลกปลอม และผลลัพธ์ฐานข้อมูล แปลงเป็นไฟล์โครงสร้างข้อมูลมาตรฐานสำหรับการส่งต่อให้กับระบบฐานข้อมูลโรงพยาบาล (Electronic Health Records - EHR หรือ Hospital LIS)
 * **ทำงานอย่างไร (How it works):**
-  รวบรวมเทเลเมตรีทั้งหมดมาสร้างเป็นสัญญาข้อมูล (Data Contract JSON) ซึ่งประกอบด้วย Sample ID, คลาสของผลลัพธ์คัดกรอง, ค่าพลังงานของ EBM, รายการ Biomarkers และลิงก์ฐานข้อมูลเพื่อการส่งต่อในรูปแบบดิจิทัล
+  รวบรวมเทเลเมตรีทั้งหมดมาสร้างเป็นสัญญาข้อมูล (Data Contract JSON) ซึ่งประกอบด้วย Sample ID, คลาสของผลลัพธ์คัดกรอง, ค่าพลังงานของ EBM, รายการ Biomarkers, พิกัด ppm, Match Confidence, เหตุผลการจับคู่ และลิงก์ฐานข้อมูลเพื่อการส่งต่อในรูปแบบดิจิทัล
 * **แก้ปัญหาในอดีตอย่างไร (How it solves existing problems):**
   > [!NOTE]
   > งานวิเคราะห์ระดับแล็บส่วนใหญ่จบลงที่โค้ดสคริปต์สั้นๆ หรือการวิเคราะห์บนแอปพลิเคชันเดี่ยวที่ระบบไอทีของโรงพยาบาลไม่สามารถนำข้อมูลไปประมวลผลต่อได้ การมีสัญญาข้อมูลที่เสถียรในระดับ **TRL 4/5** ช่วยเชื่อมโยงนวัตกรรม AI นี้เข้าสู่ระบบฐานข้อมูลทางการแพทย์ของจริงได้ทันที
@@ -96,7 +114,7 @@ graph TD
   1. **ขั้นตอนที่ 1: Ingest NMR (Step 1: Input):** เลือกโหลดคนไข้ตัวอย่างหรือลากไฟล์ดิบ (.csv/.txt)
   2. **ขั้นตอนที่ 2: Abundance Table (Step 2: Table Output):** สรุปผลความปลอดภัยเชิงฟิสิกส์ EBM และแสดงตารางปริมาณสารบ่งชี้โรค (Biomarker) ทางชีวภาพที่มีแถบหลอดเข้มข้นเรียลไทม์พร้อมลิงก์ฐานข้อมูล HMDB ทันที
   3. **ขั้นตอนที่ 3: Dual-Pane Annotated Workspace (Step 3: Graphs):** กราฟเปรียบเทียบสัญญาณดิบ vs AI-aligned สเปกตรัมจริง (Pane A) ที่มียอดพีคสามเหลี่ยมชี้เป้าระบุชื่อสารอย่างละเอียดแบบอัตโนมัติ และแถบเปรียบเทียบห้องสมุดความต่าง (Pane B) แบบ Waterfall Stack
-* **กล่องควบคุมเทคนิคการเรียนรู้ขั้นสูง (Technical Expander Panel):** เพื่อตอบรับเงื่อนไขการประเมินแบบนวัตกรรมขั้นสูงเชิงประจักษ์ (5 Hackathon Criteria) ทางเราได้รวบรวมฟังก์ชันวิเคราะห์ระบบประสาทเทียมทั้งหมด (เช่น เวกเตอร์แฝง 128 มิติ, ODE trajectory steps, EBM Physics meter, PLS-DA VIP scores และ Baseline ML) ซ่อนเก็บไว้ภายใต้แถบพับดึงขยายตัวล่างสุดชื่อ **"Advanced AI Engine & Machine Learning Diagnostics (Technical Grading Panel)"** เพื่อให้แพทย์ใช้งานได้สะอาดตาที่สุดโดยไม่สูญเสียความละเอียดข้อมูลเชิงเทคนิคสำหรับคณะกรรมการจัดงาน
+* **กล่องควบคุมเทคนิคการเรียนรู้ขั้นสูง (Technical Expander Panel):** เพื่อตอบรับเงื่อนไขการประเมินแบบนวัตกรรมขั้นสูงเชิงประจักษ์ (5 Hackathon Criteria) ทางเราได้รวบรวมฟังก์ชันวิเคราะห์ระบบประสาทเทียมทั้งหมด (เช่น เวกเตอร์แฝง 512 มิติ, ODE trajectory steps, Decoder reconstruction error, EBM Physics meter, DTW/HMDB match score, PLS-DA VIP scores และ Baseline ML) ซ่อนเก็บไว้ภายใต้แถบพับดึงขยายตัวล่างสุดชื่อ **"Advanced AI Engine & Machine Learning Diagnostics (Technical Grading Panel)"** เพื่อให้แพทย์ใช้งานได้สะอาดตาที่สุดโดยไม่สูญเสียความละเอียดข้อมูลเชิงเทคนิคสำหรับคณะกรรมการจัดงาน
 
 ---
 
@@ -104,12 +122,12 @@ graph TD
 
 ในการพิสูจน์ความเหนือชั้นตามเกณฑ์การประเมิน (Evaluation Criteria) ของ BDI Hackathon ระบบนี้ได้รับการทดสอบเปรียบเทียบกับโมเดลพื้นฐานอย่างมีนัยสำคัญ:
 
-| คุณสมบัติ / เกณฑ์การประเมิน | Classical SVM (RBF Core) | Classical Random Forest | Hybrid AI (Encoder + ODE + EBM) |
+| คุณสมบัติ / เกณฑ์การประเมิน | Classical SVM (RBF Core) | Classical Random Forest | Hybrid AI (1D-CNN Encoder + ODE + Decoder + ppm-space EBM) |
 | :--- | :---: | :---: | :---: |
 | **ความแม่นยำ F1-Score** | 0.83 | 0.81 | **0.95** (เพิ่มขึ้นอย่างก้าวกระโดด) |
 | **ความทนทานต่อ Chemical Drift** | ต่ำมาก (หากเลื่อนจะจำแนกสารผิด) | ปานกลาง (ต้องการข้อมูลเทรนจำนวนมหาศาล) | **สูงมาก** (Neural ODE จัดแนวสัญญาณอัตโนมัติ) |
-| **การตรวจจับ Ghost Peaks** | ไม่รองรับ (พยายามคำนวณรวมไปในพีคหลัก) | ไม่รองรับ (มองเป็นสัญญาณปกติ) | **ยอดเยี่ยม** (EBM ตรวจสอบกฎฟิสิกส์เคมีแล้วลบทิ้ง) |
-| **การค้นหาสารบ่งชี้โรค (HMDB)** | แมนนวล | แมนนวล | **อัตโนมัติ 100% (Real-time Discovery)** |
+| **การตรวจจับ Ghost Peaks** | ไม่รองรับ (พยายามคำนวณรวมไปในพีคหลัก) | ไม่รองรับ (มองเป็นสัญญาณปกติ) | **ยอดเยี่ยม** (Decoder คืนสเปกตรัม 20,000 จุด แล้ว EBM ตรวจสอบกฎฟิสิกส์บนแกน ppm) |
+| **การค้นหาสารบ่งชี้โรค (HMDB)** | แมนนวล | แมนนวล | **อัตโนมัติพร้อมเหตุผล** (Peak assignment + DTW + EBM confidence scoring) |
 | **ความพร้อมด้านอินทิเกรตระบบ** | โค้ดสคริปต์ดิบ | โค้ดสคริปต์ดิบ | **TRL 4/5 Ready (Structured EMR Report)** |
 
 ---

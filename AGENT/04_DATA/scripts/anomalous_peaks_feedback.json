@@ -1,0 +1,20 @@
+[
+    {
+        "sample_id": "NMR-SAMPLE-2026-X99",
+        "timestamp": "2026-05-28T16:18:26.792358",
+        "raw_energy_score": 0.4029240161180496,
+        "energy_threshold": 1.1,
+        "anomalous_peak_ppm": 4.15,
+        "details": "Ghost peak identified in carbohydrate zone violating spin-coupling laws.",
+        "action": "suppressed_and_flagged"
+    },
+    {
+        "sample_id": "NMR-SAMPLE-2026-X99",
+        "timestamp": "2026-05-28T16:18:41.005196",
+        "raw_energy_score": 1.542021755129099,
+        "energy_threshold": 1.1,
+        "anomalous_peak_ppm": 4.15,
+        "details": "Ghost peak identified in carbohydrate zone violating spin-coupling laws.",
+        "action": "suppressed_and_flagged"
+    }
+]
