@@ -57,7 +57,7 @@ NMR signals are highly sensitive to experimental conditions, introducing non-bio
 
 ### C. Data Extraction and Engineering Constraints
 
-* **The PDF Constraint:** The sample file is provided as a PDF document rather than structured tabular arrays (like CSV or Parquet). This demands an immediate, error-free data parsing script to reconstruct the underlying 2D numeric matrix before any preprocessing can occur.
+* **The PDF Example Constraint:** The PDF file is provided only as a visual example of the processed spectrum plot rather than the actual training data. The actual operational dataset for the model will be provided directly as processed 2D numeric arrays (like CSV or Parquet), which does not require raw extraction.
 
 ---
 
@@ -80,7 +80,7 @@ The official competition guidelines outline five core analytical objectives. To 
 To guarantee maximum score delivery under the **Feasibility (30 points)** and **Innovation (15 points)** criteria, a hybrid architecture is deployed. This framework runs a fast, reliable baseline layer for immediate prototyping alongside an advanced, mathematically rigorous modeling layer for innovation.
 
 ```
-[Raw PDF Document] ──> [Data Extraction Pipeline]
+[Processed 2D Matrix (CSV/Parquet)] ──> [Data Processing Pipeline]
                              │
                              ▼
                [Spectral Preprocessing Stack]
