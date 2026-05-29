@@ -74,3 +74,18 @@ env/
 # System Files
 .DS_Store
 Thumbs.db
+
+# Clinical outputs (dynamically generated EHR reports & active learning logs)
+clinical_report.json
+anomalous_peaks_feedback.json
+
+# Local frontend build caches and dependencies
+frontend/.astro/
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# Archived friend's sandbox POC (cloned locally for reference, ignored from version control)
+BDI-flow-test/
+
+

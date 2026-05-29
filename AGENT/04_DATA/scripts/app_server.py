@@ -94,7 +94,7 @@ def analyze_spectrum(request: AnalyzeRequest):
     Runs the 3-stage PyTorch pipeline (Encoder projection, Latent ODE alignment, EBM verification).
     """
     try:
-        raw_input = torch.tensor([request.raw_spectrum], dtype=torch.float32)
+        raw_input = torch.tensor([request.raw_spectrum], dtype=torch.float32).to(pipeline_model.device)
         labels = [request.label]
         
         # Run workflow

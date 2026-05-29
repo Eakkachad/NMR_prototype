@@ -50,6 +50,13 @@
                     </select>
                 </div>
                 
+                <!-- File Upload -->
+                <div class="control-group">
+                    <label for="file-upload">Upload Raw NMR File (CSV/TXT)</label>
+                    <input type="file" id="file-upload" class="form-file" accept=".csv,.txt" />
+                    <span class="help-text">Directly parses columns and maps onto AI models.</span>
+                </div>
+                
                 <hr class="divider" />
 
                 <!-- Slide Perturbations -->
@@ -394,6 +401,21 @@
         .form-select:focus {
             border-color: var(--primary);
             outline: none;
+        }
+
+        .form-file {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px dashed var(--border-color);
+            border-radius: 8px;
+            font-family: var(--font-main);
+            font-size: 0.85rem;
+            background-color: #F8FAFC;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+        .form-file:hover {
+            border-color: var(--primary);
         }
 
         .slider-header {
@@ -941,6 +963,7 @@
             const ghostCheckbox = document.getElementById('ghost-checkbox');
             const ebmSlider = document.getElementById('ebm-slider');
             const ebmVal = document.getElementById('ebm-val');
+            const fileUpload = document.getElementById('file-upload');
             
             const analyzeBtn = document.getElementById('analyze-btn');
             const btnText = analyzeBtn.querySelector('.btn-text');
@@ -966,6 +989,102 @@
             const gaugeLbl = document.getElementById('gauge-lbl');
             const jsonPayload = document.getElementById('json-payload');
             const downloadJsonBtn = document.getElementById('download-json-btn');
+
+            function interpolate(x, y, targetX) {
+                const targetY = [];
+                for (let k = 0; k < targetX.length; k++) {
+                    const tx = targetX[k];
+                    if (tx <= x[0]) {
+                        targetY.push(y[0]);
+                    } else if (tx >= x[x.length - 1]) {
+                        targetY.push(y[y.length - 1]);
+                    } else {
+                        let i = 0;
+                        while (i < x.length - 1 && x[i+1] < tx) {
+                            i++;
+                        }
+                        const x0 = x[i];
+                        const x1 = x[i+1];
+                        const y0 = y[i];
+                        const y1 = y[i+1];
+                        const val = y0 + (y1 - y0) * (tx - x0) / (x1 - x0);
+                        targetY.push(val);
+                    }
+                }
+                return targetY;
+            }
+
+            async function handleFileUpload(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const text = e.target.result;
+                            const lines = text.split("\n");
+                            if (lines.length < 10) throw new Error("File is empty or too short.");
+                            
+                            const sampleLine = lines[0];
+                            let delim = null;
+                            if (sampleLine.includes("\t")) delim = "\t";
+                            else if (sampleLine.includes(";")) delim = ";";
+                            else if (sampleLine.includes(",")) delim = ",";
+                            
+                            const data = [];
+                            let hasHeader = false;
+                            const firstParts = delim ? sampleLine.split(delim) : sampleLine.trim().split(/\s+/);
+                            if (firstParts.length >= 2) {
+                                if (isNaN(parseFloat(firstParts[0])) || isNaN(parseFloat(firstParts[1]))) {
+                                    hasHeader = true;
+                                }
+                            }
+                            
+                            const startRow = hasHeader ? 1 : 0;
+                            for (let i = startRow; i < lines.length; i++) {
+                                const line = lines[i].trim();
+                                if (!line) continue;
+                                const parts = delim ? line.split(delim) : line.split(/\s+/);
+                                if (parts.length >= 2) {
+                                    const ppm = parseFloat(parts[0].trim());
+                                    const intensity = parseFloat(parts[1].trim());
+                                    if (!isNaN(ppm) && !isNaN(intensity)) {
+                                        data.push({ ppm, intensity });
+                                    }
+                                }
+                            }
+                            
+                            if (data.length < 10) throw new Error("No numeric coordinates parsed. Ensure 2 columns exist (PPM, Intensity).");
+                            
+                            data.sort((a, b) => a.ppm - b.ppm);
+                            const rawX = data.map(d => d.ppm);
+                            const rawY = data.map(d => d.intensity);
+                            
+                            const targetX = [];
+                            for (let i = 0; i < 4000; i++) {
+                                targetX.push(0.0 + (10.0 - 0.0) * i / 3999);
+                            }
+                            
+                            let targetY = interpolate(rawX, rawY, targetX);
+                            
+                            const maxVal = Math.max(...targetY);
+                            if (maxVal > 0) {
+                                targetY = targetY.map(v => (v / maxVal) * 3.5);
+                            }
+                            
+                            resolve({
+                                ppm_axis: targetX,
+                                raw_spectrum: targetY,
+                                drifted_ppm: targetX,
+                                annotations: [],
+                                sample_type: "Uploaded_NMR"
+                            });
+                        } catch (err) {
+                            reject(err);
+                        }
+                    };
+                    reader.onerror = () => reject(new Error("File reading error."));
+                    reader.readAsText(file);
+                });
+            }
 
             let activeData = null;
             let currentPayload = null;
@@ -1448,6 +1567,95 @@
                 document.body.appendChild(dlAnchor);
                 dlAnchor.click();
                 dlAnchor.remove();
+            });
+
+            fileUpload.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                btnText.textContent = "Parsing NMR File...";
+                analyzeBtn.disabled = true;
+                
+                try {
+                    activeData = await handleFileUpload(file);
+                    
+                    const resA = await fetch(`${API_BASE}/api/sample?sample_type=Plant_Extract_A&noise_level=0.0&shift_drift=0.0`);
+                    const resB = await fetch(`${API_BASE}/api/sample?sample_type=Plant_Extract_B&noise_level=0.0&shift_drift=0.0`);
+                    const resC = await fetch(`${API_BASE}/api/sample?sample_type=Plant_Extract_C&noise_level=0.0&shift_drift=0.0`);
+                    
+                    const dataA = await resA.json();
+                    const dataB = await resB.json();
+                    const dataC = await resC.json();
+                    
+                    function getCorrelation(x, y) {
+                        const n = x.length;
+                        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+                        for (let i = 0; i < n; i++) {
+                            sumX += x[i];
+                            sumY += y[i];
+                            sumXY += x[i] * y[i];
+                            sumX2 += x[i] * x[i];
+                            sumY2 += y[i] * y[i];
+                        }
+                        const num = n * sumXY - sumX * sumY;
+                        const den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+                        return den === 0 ? 0 : num / den;
+                    }
+                    
+                    const corrA = getCorrelation(activeData.raw_spectrum, dataA.raw_spectrum);
+                    const corrB = getCorrelation(activeData.raw_spectrum, dataB.raw_spectrum);
+                    const corrC = getCorrelation(activeData.raw_spectrum, dataC.raw_spectrum);
+                    
+                    let bestCorr = corrA;
+                    let bestClass = "Plant_Extract_A";
+                    let bestName = "Sugarcane Extract";
+                    
+                    if (corrB > bestCorr) {
+                        bestCorr = corrB;
+                        bestClass = "Plant_Extract_B";
+                        bestName = "Coffee Extract";
+                    }
+                    if (corrC > bestCorr) {
+                        bestCorr = corrC;
+                        bestClass = "Plant_Extract_C";
+                        bestName = "Soybean Extract";
+                    }
+                    
+                    activeData.sample_type = bestClass;
+                    activeData.annotations = bestClass === "Plant_Extract_A" ? dataA.annotations : (bestClass === "Plant_Extract_B" ? dataB.annotations : dataC.annotations);
+                    
+                    sampleSelect.value = bestClass;
+                    scorecardExtract.textContent = `${bestName} (${(bestCorr * 100).toFixed(0)}% match)`;
+                    
+                    renderPlots();
+                    renderBiomarkers();
+                    
+                    alertBanner.className = "alert-banner emerald";
+                    alertBadge.textContent = "✅ FILE IMPORT SUCCESS";
+                    alertTitle.textContent = `Parsed Real NMR File: ${file.name}`;
+                    alertDesc.textContent = `NMR data successfully interpolated to 4000 points and mapped to ${bestName} based on ${(bestCorr * 100).toFixed(1)}% fingerprint match. Ready to run deep learning clinical analysis on RTX 4060 GPU!`;
+                    alertBanner.classList.remove('hidden');
+                    
+                } catch (err) {
+                    console.error("Error loading file:", err);
+                    alertBanner.className = "alert-banner";
+                    alertBanner.style.backgroundColor = "var(--red-bg)";
+                    alertBanner.style.border = "1px solid var(--red)";
+                    
+                    alertBadge.textContent = "❌ PARSE ERROR";
+                    alertBadge.className = "badge";
+                    alertBadge.style.backgroundColor = "var(--red-bg)";
+                    alertBadge.style.color = "var(--red-text)";
+                    alertBadge.style.border = "1px solid var(--red)";
+                    
+                    alertTitle.textContent = "File Import Failure";
+                    alertTitle.style.color = "var(--red-text)";
+                    alertDesc.textContent = `Error reading NMR file: ${err.message}`;
+                    alertBanner.classList.remove('hidden');
+                } finally {
+                    btnText.textContent = "⚡ Run AI Diagnostic Analysis";
+                    analyzeBtn.disabled = false;
+                }
             });
 
             // Initial load

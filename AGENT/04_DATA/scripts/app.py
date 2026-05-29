@@ -147,6 +147,80 @@ def downsample_spectrum(ppm: np.ndarray, intensities: np.ndarray, target_size: i
     return ppm_ds, intensities_ds
 
 
+def parse_uploaded_nmr(uploaded_file) -> Tuple[np.ndarray, np.ndarray, str]:
+    """
+    Parses an uploaded CSV or TXT file containing actual NMR spectroscopy data.
+    Automatically detects delimiters, headers, and interpolates data onto the
+    standard 4000-point model axis (0.0 to 10.0 ppm).
+    """
+    try:
+        # Read file content
+        content = uploaded_file.getvalue().decode("utf-8")
+        lines = content.strip().split("\n")
+        if not lines:
+            raise ValueError("File is empty.")
+            
+        # Detect delimiter (comma, tab, space, or semicolon)
+        sample_line = lines[0]
+        if "\t" in sample_line:
+            delim = "\t"
+        elif ";" in sample_line:
+            delim = ";"
+        elif "," in sample_line:
+            delim = ","
+        else:
+            delim = None # Whitespace
+            
+        # Parse data lines
+        data = []
+        has_header = False
+        
+        # Try to detect header by parsing first line as float
+        first_line_parts = sample_line.split(delim) if delim else sample_line.split()
+        if len(first_line_parts) >= 2:
+            try:
+                float(first_line_parts[0].strip())
+                float(first_line_parts[1].strip())
+            except ValueError:
+                has_header = True
+            
+        start_row = 1 if has_header else 0
+        for line in lines[start_row:]:
+            if not line.strip():
+                continue
+            parts = line.strip().split(delim) if delim else line.strip().split()
+            if len(parts) >= 2:
+                try:
+                    ppm = float(parts[0].strip())
+                    val = float(parts[1].strip())
+                    data.append((ppm, val))
+                except ValueError:
+                    continue
+                    
+        if len(data) < 10:
+            raise ValueError("Too few valid data points found in file. Ensure 2 columns exist (PPM, Intensity).")
+            
+        # Sort by ppm ascending
+        data.sort(key=lambda x: x[0])
+        raw_ppms = np.array([x[0] for x in data])
+        raw_ints = np.array([x[1] for x in data])
+        
+        # Standard model ppm grid: 0.0 to 10.0 ppm, 4000 points
+        target_ppm = np.linspace(0.0, 10.0, 4000)
+        
+        # Interpolate the uploaded signal onto target_ppm grid
+        interpolated_ints = np.interp(target_ppm, raw_ppms, raw_ints, left=0.0, right=0.0)
+        
+        # Normalize the intensity to match model ranges (typical max around 3.5)
+        max_val = np.max(interpolated_ints)
+        if max_val > 0:
+            interpolated_ints = (interpolated_ints / max_val) * 3.5
+            
+        return target_ppm, interpolated_ints, "SUCCESS"
+    except Exception as e:
+        return np.linspace(0.0, 10.0, 4000), np.zeros(4000), f"Error parsing file: {str(e)}"
+
+
 # --- SIDEBAR INTERFACE ---
 with st.sidebar:
     st.markdown('<div style="text-align: center; padding-bottom: 20px;"><span style="font-size: 3rem;">🌌</span></div>', unsafe_allow_html=True)
@@ -230,16 +304,41 @@ with col_input_2:
 
 # Parse selected or uploaded sample
 if uploaded_file is not None:
-    file_name = uploaded_file.name.lower()
-    if "sugar" in file_name or "sugarcane" in file_name:
+    ppm_axis, raw_spectrum, parse_status = parse_uploaded_nmr(uploaded_file)
+    if parse_status == "SUCCESS":
+        # Determine the best matching class using correlation
+        ref_spectra, _, _ = SyntheticNMRGenerator.generate_batch(
+            batch_size=3, noise_level=0.0, drift_amplitude=0.0, add_ghost_peaks=False
+        )
+        corrs = []
+        for i in range(3):
+            ref_spec = ref_spectra[i].numpy()
+            corr = np.corrcoef(raw_spectrum, ref_spec)[0, 1]
+            corrs.append(corr if not np.isnan(corr) else 0.0)
+            
+        best_idx = np.argmax(corrs)
+        best_corr = corrs[best_idx]
+        
+        classes = ["Plant_Extract_A", "Plant_Extract_B", "Plant_Extract_C"]
+        class_names = [
+            "Sugarcane Extract (Sugar-Rich Profile)",
+            "Coffee Bean Extract (Aromatic-Rich Profile)",
+            "Fermented Soybean Extract (Amino-Acid-Rich Profile)"
+        ]
+        
+        active_class = classes[best_idx]
+        selected_class = f"{class_names[best_idx]} [Best Correlation Match: {best_corr*100:.1f}%]"
+        st.sidebar.success(f"Parsed NMR file! Mapped as {classes[best_idx]} ({best_corr*100:.0f}% match)")
+    else:
+        st.sidebar.error(parse_status)
         active_class = "Plant_Extract_A"
         selected_class = "Sugarcane Extract (Sugar-Rich Profile)"
-    elif "coffee" in file_name or "aromatic" in file_name:
-        active_class = "Plant_Extract_B"
-        selected_class = "Coffee Bean Extract (Aromatic-Rich Profile)"
-    else:
-        active_class = "Plant_Extract_C"
-        selected_class = "Fermented Soybean Extract (Amino-Acid-Rich Profile)"
+        # Fallback to simulated data
+        raw_tensor, ppm_tensor, _ = SyntheticNMRGenerator.generate_batch(
+            batch_size=3, noise_level=noise_level, drift_amplitude=0.0, add_ghost_peaks=add_ghost
+        )
+        raw_spectrum = raw_tensor[0].numpy()
+        ppm_axis = ppm_tensor.numpy()
 else:
     sample_mapping = {
         "Patient Sample #001 (Sugarcane Extract - Sugar-Rich)": ("Plant_Extract_A", "Sugarcane Extract (Sugar-Rich Profile)"),
@@ -247,23 +346,20 @@ else:
         "Patient Sample #003 (Fermented Soybean Extract - Amino-Acid-Rich)": ("Plant_Extract_C", "Fermented Soybean Extract (Amino-Acid-Rich Profile)")
     }
     active_class, selected_class = sample_mapping[selected_sample]
-
-
-# --- DATA SIMULATION STREAM ---
-# Generate the live sample spectrum based on sidebar settings and active class
-raw_tensor, ppm_tensor, _ = SyntheticNMRGenerator.generate_batch(
-    batch_size=3, noise_level=noise_level, drift_amplitude=0.0, add_ghost_peaks=add_ghost
-)
-
-# Extract the spectrum corresponding to the active class index
-class_indices = {
-    "Plant_Extract_A": 0,
-    "Plant_Extract_B": 1,
-    "Plant_Extract_C": 2
-}
-active_idx = class_indices[active_class]
-raw_spectrum = raw_tensor[active_idx].numpy()
-ppm_axis = ppm_tensor.numpy()
+    
+    # Generate the live sample spectrum based on sidebar settings and active class
+    raw_tensor, ppm_tensor, _ = SyntheticNMRGenerator.generate_batch(
+        batch_size=3, noise_level=noise_level, drift_amplitude=0.0, add_ghost_peaks=add_ghost
+    )
+    
+    class_indices = {
+        "Plant_Extract_A": 0,
+        "Plant_Extract_B": 1,
+        "Plant_Extract_C": 2
+    }
+    active_idx = class_indices[active_class]
+    raw_spectrum = raw_tensor[active_idx].numpy()
+    ppm_axis = ppm_tensor.numpy()
 
 # Apply the shift drift offset manually on the ppm axis to represent chemical shift drift
 drifted_ppm = ppm_axis - shift_drift
@@ -623,9 +719,9 @@ with st.expander("🛠️ Advanced AI Engine & Machine Learning Diagnostics (Tec
     
     with col_tech_1:
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.markdown("##### Latent Feature Activation (128 Dimensions)")
+        st.markdown("##### Latent Feature Activation (512 Dimensions)")
         # Simulate Encoder mapping
-        latent_features = pipeline.stage_1(torch.tensor([raw_spectrum], dtype=torch.float32))[0].detach().numpy()
+        latent_features = pipeline.stage_1(torch.tensor([raw_spectrum], dtype=torch.float32).to(pipeline.device))[0].detach().cpu().numpy()
         
         fig_latent = go.Figure()
         fig_latent.add_trace(go.Bar(
@@ -653,10 +749,10 @@ with st.expander("🛠️ Advanced AI Engine & Machine Learning Diagnostics (Tec
     with col_tech_2:
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.markdown("##### Latent ODE Integration Trajectory")
-        latent_torch = torch.tensor([raw_spectrum], dtype=torch.float32)
+        latent_torch = torch.tensor([raw_spectrum], dtype=torch.float32).to(pipeline.device)
         latent_init = pipeline.stage_1(latent_torch)
         _, trajectory_list = pipeline.stage_2.forward_trajectory(latent_init)
-        traj_data = np.array([t[0].detach().numpy() for t in trajectory_list])
+        traj_data = np.array([t[0].detach().cpu().numpy() for t in trajectory_list])
         
         fig_traj = go.Figure()
         dims_to_plot = [4, 18, 42, 88]
